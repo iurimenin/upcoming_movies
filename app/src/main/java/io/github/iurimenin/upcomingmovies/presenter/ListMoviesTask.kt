@@ -16,22 +16,36 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.*
 import kotlin.collections.ArrayList
+import kotlin.collections.HashMap
 
 
 /**
  * Created by Iuri Menin on 26/08/17.
  */
-class ListMoviesTask(private val delegate: AsyncTaskDelegate?, private val context: Context) : AsyncTask<String, Void, ArrayList<MovieVO>>() {
+class ListMoviesTask(private val mCallback: AsyncTaskCallback,
+                     private val mContext: Context) :
+        AsyncTask<String, Void, ArrayList<MovieVO>>() {
 
+    private val GENRES = "genres"
     private val RESULT = "results"
-    private val TOTAL_PAGES = "total_pages"
     private val TAG = "ListMoviesTask"
+    private val TOTAL_PAGES = "total_pages"
 
-    private var reader: BufferedReader? = null
-    private var urlConnection: HttpURLConnection? = null
+    private var mBufferedReader: BufferedReader? = null
+    private var mUrlConnection: HttpURLConnection? = null
+    private val mGenreList = HashMap<Int?, GenreVO>()
+
+    override fun onPreExecute() {
+        loadGenres()
+    }
 
     override fun doInBackground(vararg params: String): ArrayList<MovieVO> {
         return getMoviesFromApi()
+    }
+
+    override fun onPostExecute(result: ArrayList<MovieVO>) {
+        super.onPostExecute(result)
+        mCallback.processFinish(result)
     }
 
     private fun getMoviesFromApi(): ArrayList<MovieVO> {
@@ -52,19 +66,19 @@ class ListMoviesTask(private val delegate: AsyncTaskDelegate?, private val conte
 
                 val url = URL(uri.toString())
 
-                urlConnection = url.openConnection() as HttpURLConnection
-                urlConnection?.setRequestMethod("GET")
-                urlConnection?.connect()
+                mUrlConnection = url.openConnection() as HttpURLConnection
+                mUrlConnection?.requestMethod = "GET"
+                mUrlConnection?.connect()
 
-                val inputStream = urlConnection?.getInputStream()
+                val inputStream = mUrlConnection?.inputStream
                 val buffer = StringBuffer()
                 if (inputStream != null) {
-                    reader = BufferedReader(InputStreamReader(inputStream))
+                    mBufferedReader = BufferedReader(InputStreamReader(inputStream))
 
-                    var line = reader?.readLine()
+                    var line = mBufferedReader?.readLine()
                     while (line != null) {
                         buffer.append(line + "\n")
-                        line = reader?.readLine()
+                        line = mBufferedReader?.readLine()
                     }
 
                     if (buffer.isEmpty()) {
@@ -78,40 +92,81 @@ class ListMoviesTask(private val delegate: AsyncTaskDelegate?, private val conte
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error ", e)
+            Log.e(TAG, "Error on getMoviesFromApi", e)
             return ArrayList()
         } finally {
-            urlConnection?.disconnect()
-            reader?.close()
+            mUrlConnection?.disconnect()
+            mBufferedReader?.close()
         }
         return listMovies
     }
 
-    private fun  getPhoneLanguage(): String {
+    private fun getPhoneLanguage(): String {
         return Locale.getDefault().toString().replace("_", "-")
     }
 
-    private fun getGenreDataFromJson(): ArrayList<GenreVO> {
+    private fun loadGenres() {
 
-        var fileName = ""
-        if (Locale.getDefault().language == "pt")
-            fileName = "genre-pt.json"
-        else
-            fileName = "genre.json"
-
-        reader = BufferedReader(InputStreamReader(context.assets.open(fileName)))
-        var line = reader?.readLine()
-        val buffer = StringBuffer()
-        while (line != null) {
-            buffer.append(line + "\n")
-            line = reader?.readLine()
-        }
-        val json = buffer.toString()
         val gson = Gson()
         val typeGenre = object : TypeToken<List<GenreVO>>() {}.type
 
-        val genreList : ArrayList<GenreVO> = gson.fromJson(json, typeGenre)
-        return genreList
+        val sharedPref = mContext.getSharedPreferences("UPCOMINGMOVIES", Context.MODE_PRIVATE)
+        val jsonStored = sharedPref?.getString(GenreVO.TAG, "")
+
+        if (!jsonStored.isNullOrEmpty()) {
+            val listStored : ArrayList<GenreVO> = gson.fromJson(jsonStored, typeGenre)
+            for (genreVO in listStored) {
+                mGenreList.put(genreVO.id, genreVO)
+            }
+        } else {
+            try {
+                val uri = Uri.parse(BuildConfig.THEMOVIEDB_API_URL).buildUpon()
+                        .appendPath("genre")
+                        .appendPath("movie")
+                        .appendPath("list")
+                        .appendQueryParameter("api_key", BuildConfig.API_KEY)
+                        .appendQueryParameter("language", getPhoneLanguage())
+                        .build()
+
+                val url = URL(uri.toString())
+
+                mUrlConnection = url.openConnection() as HttpURLConnection
+                mUrlConnection?.requestMethod = "GET"
+                mUrlConnection?.connect()
+
+                val inputStream = mUrlConnection?.inputStream
+                val buffer = StringBuffer()
+                if (inputStream != null) {
+                    mBufferedReader = BufferedReader(InputStreamReader(inputStream))
+
+                    var line = mBufferedReader?.readLine()
+                    while (line != null) {
+                        buffer.append(line + "\n")
+                        line = mBufferedReader?.readLine()
+                    }
+
+                    if (buffer.isNotEmpty()) {
+                        val json = buffer.toString()
+                        val genreJson = JSONObject(json)
+
+                        val genreList: ArrayList<GenreVO> =
+                                gson.fromJson(genreJson.get(GENRES).toString(), typeGenre)
+
+                        val editor = sharedPref.edit()
+                        editor.putString(GenreVO.TAG, genreJson.get(GENRES).toString())
+                        editor.apply()
+                        for (genreVO in genreList) {
+                            mGenreList.put(genreVO.id, genreVO)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error on loadGenres", e)
+            } finally {
+                mUrlConnection?.disconnect()
+                mBufferedReader?.close()
+            }
+        }
     }
 
     private fun getMoviesDataFromJson(moviesJson: JSONObject): ArrayList<MovieVO> {
@@ -123,25 +178,12 @@ class ListMoviesTask(private val delegate: AsyncTaskDelegate?, private val conte
 
         val movies : ArrayList<MovieVO> = gson.fromJson(moviesArray.toString(), typeMovies)
 
-        val moviesWithPoster = ArrayList<MovieVO>()
-        val genreList = getGenreDataFromJson()
         for (movie in movies) {
-            if(movie.poster_path != null) {
-                for (genreId in movie.genre_ids) {
-                    val genre = genreList.filter { vo -> vo.id == genreId }.single()
-                    if (movie.genres == null)
-                        movie.genres = ArrayList<GenreVO>()
-                    movie.genres.add(genre)
-                }
-                moviesWithPoster.add(movie)
+            movie.genres = ArrayList()
+            for (genre_id in movie.genre_ids) {
+                mGenreList[genre_id]?.let { movie.genres.add(it) }
             }
         }
-        return moviesWithPoster
-    }
-
-    override fun onPostExecute(result: ArrayList<MovieVO>) {
-
-        super.onPostExecute(result)
-        delegate?.processFinish(result)
+        return movies
     }
 }

@@ -8,22 +8,37 @@ import java.util.*
 /**
  * Created by Iuri Menin on 26/08/17.
  */
-class MovieVO : Parcelable {
+class MovieVO protected constructor(`in`: Parcel) : Parcelable {
 
-    var vote_count: String = ""
+    var vote_count: String? = ""
     var id: Int = 0
-    var vote_average: String= ""
-    var title: String = ""
-    var popularity: String = ""
-    var poster_path: String = ""
-    var original_language: String = ""
-    var original_title: String = ""
-    var backdrop_path: String = ""
-    var adult: String = ""
-    var overview: String = ""
-    var release_date: String = ""
+    var vote_average:  String? = ""
+    var title:  String? = ""
+    var popularity:  String? = ""
+    var poster_path:  String? = ""
+    var original_language:  String? = ""
+    var original_title:  String? = ""
+    var backdrop_path:  String? = ""
+    var adult:  String? = ""
+    var overview:  String? = ""
+    var release_date:  String? = ""
     var genre_ids: ArrayList<Int> = ArrayList()
     var genres: ArrayList<GenreVO> = ArrayList()
+
+    fun getGenreString() : String {
+
+        val sb = StringBuilder()
+        if (genres != null ) {
+            for (genre in genres) {
+                if (sb.toString().isNotEmpty())
+                    sb.append(", ")
+
+                sb.append(genre.name)
+            }
+        }
+
+        return sb.toString()
+    }
 
     override fun describeContents(): Int {
         return 0
@@ -43,7 +58,7 @@ class MovieVO : Parcelable {
         dest.writeString(this.overview)
         dest.writeString(this.release_date)
         dest.writeList(this.genre_ids)
-        dest.writeList(this.genres)
+        dest.writeTypedList(this.genres)
     }
 
     override fun equals(other: Any?): Boolean {
@@ -58,10 +73,24 @@ class MovieVO : Parcelable {
     }
 
     override fun hashCode(): Int {
-        return id?.hashCode() ?: 0
+        return id.hashCode()
     }
 
-    protected constructor(`in`: Parcel) {
+    companion object {
+
+        @JvmField val CREATOR: Parcelable.Creator<MovieVO> = object : Parcelable.Creator<MovieVO> {
+            override fun createFromParcel(source: Parcel): MovieVO {
+                return MovieVO(source)
+            }
+
+            override fun newArray(size: Int): Array<MovieVO?> {
+                return arrayOfNulls(size)
+            }
+        }
+        val  PARCELABLE_KEY: String = "movie"
+    }
+
+    init {
         this.vote_count = `in`.readString()
         this.id = `in`.readInt()
         this.vote_average = `in`.readString()
@@ -74,24 +103,10 @@ class MovieVO : Parcelable {
         this.adult = `in`.readString()
         this.overview = `in`.readString()
         this.release_date = `in`.readString()
-        this.genre_ids = ArrayList<Int>()
+        this.genre_ids = ArrayList()
         `in`.readList(this.genre_ids, Int::class.java.classLoader)
-        this.genres = ArrayList<GenreVO>()
+        this.genres = ArrayList()
         `in`.readTypedList(this.genres, GenreVO.CREATOR)
-    }
-
-    companion object {
-
-        val CREATOR: Parcelable.Creator<MovieVO> = object : Parcelable.Creator<MovieVO> {
-            override fun createFromParcel(source: Parcel): MovieVO {
-                return MovieVO(source)
-            }
-
-            override fun newArray(size: Int): Array<MovieVO?> {
-                return arrayOfNulls(size)
-            }
-        }
-        val  PARCELABLE_KEY: String = "movie"
     }
 
 
